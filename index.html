@@ -66,6 +66,10 @@
   .button-group {display:flex;flex-direction:column;gap:10px;margin-top:15px;}
   .admin-buttons {display:flex;flex-direction:column;gap:8px;margin-top:10px;}
   .admin-buttons .btn {margin:2px 0;padding:10px 14px;font-size:14px;}
+  .product-card-buttons {display:flex;align-items:center;justify-content:space-between;margin-top:10px;}
+  .product-card-buttons .btn {width:auto;flex:1;margin-right:8px;}
+  .product-card-buttons .price {font-weight:bold;font-size:16px;color:#3a0060;}
+  .alert-message {position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.8);color:white;padding:15px 25px;border-radius:8px;z-index:1000;font-weight:bold;text-align:center;}
 </style>
 </head>
 <body>
@@ -111,7 +115,6 @@ let products = [
   {id:1,categoria:"Pizza",nome:"Pizza Calabresa",descricao:"Pizza com borda de requeijão",preco:30.00,imagem:"pizza-calabresa.jpg"}
 ];
 
-// FIREBASE FUNCTIONS
 async function salvarPedidoFirebase(pedido) {
   try {
     const docRef = await window.firestore.addDoc(window.firestore.collection(window.db, "pedidos"), {
@@ -119,7 +122,6 @@ async function salvarPedidoFirebase(pedido) {
       timestamp: new Date(),
       status: 'Pedido realizado - Aguardando confirmação do pagamento'
     });
-    console.log("Pedido salvo no Firebase com ID: ", docRef.id);
     return docRef.id;
   } catch (e) {
     console.error("Erro ao salvar pedido: ", e);
@@ -158,7 +160,6 @@ async function atualizarStatusFirebase(pedidoId, novoStatus) {
       status: novoStatus,
       ultimaAtualizacao: new Date()
     });
-    console.log("Status atualizado com sucesso");
     return true;
   } catch (e) {
     console.error("Erro ao atualizar status: ", e);
@@ -185,7 +186,6 @@ async function limparDadosAntigos() {
     });
     
     await batch.commit();
-    console.log("Dados antigos limpos com sucesso");
   } catch (e) {
     console.error("Erro ao limpar dados antigos: ", e);
   }
@@ -201,7 +201,6 @@ function iniciarOuvintePedidos() {
     let novosPedidos = 0;
     snapshot.docChanges().forEach((change) => {
       if (change.type === "added") {
-        console.log("Novo pedido: ", change.doc.data());
         novosPedidos++;
       }
     });
@@ -219,7 +218,6 @@ function iniciarOuvintePedidos() {
   });
 }
 
-// LOCALSTORAGE FUNCTIONS
 function loadFromStorage() {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
@@ -242,13 +240,6 @@ function saveToStorage() {
     unreadUserNotifications: unreadUserNotifications
   };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-}
-
-function clearStorage() {
-  cart = [];
-  userNotifications = [];
-  unreadUserNotifications = 0;
-  localStorage.removeItem(STORAGE_KEY);
 }
 
 function updateNotificationCounter() {
@@ -280,43 +271,50 @@ function updateUserNotificationCounter() {
   saveToStorage();
 }
 
-function addNotification() {
-  unreadNotifications++;
-  updateNotificationCounter();
-}
-
 function addUserNotification() {
   unreadUserNotifications++;
   updateUserNotificationCounter();
 }
 
 async function sendTelegramNotification(pedido) {
-  const message = `🆕 *NOVO PEDIDO N° ${pedido.codigo}*\n\n*Resumo do Pedido:*\n💰 *Total:* R$ ${pedido.total.toFixed(2)}\n📍 *Endereço:* ${pedido.local}\n📱 *Telefone:* ${pedido.whatsapp}\n📋 *Itens:* ${pedido.produtos.map(p => `${p.nome} (x${p.qtd})`).join(', ')}\n⏰ *Data:* ${pedido.data}\n\n_Pedido realizado - Aguardando confirmação do pagamento_`;
+  const message = `🆕 *NOVO PEDIDO RECEBIDO!*
+📦 Código: #${pedido.codigo}
+💰 Total: R$ ${pedido.total.toFixed(2)}
+📍 Endereço: ${pedido.local}
+📱 WhatsApp: ${pedido.whatsapp}
+📋 Itens: ${pedido.produtos.map(p => `${p.nome} (x${p.qtd})`).join(', ')}
+⏰ Data: ${pedido.data}
+
+🔔 _Verifique a área administrativa para mais detalhes._`;
   
-  try {
-    const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        chat_id: CHAT_ID,
-        text: message,
-        parse_mode: 'Markdown'
-      })
-    });
-    
-    const result = await response.json();
-    if (!result.ok) {
-      console.error('Erro Telegram:', result);
-      throw new Error('Erro ao enviar para Telegram');
-    }
-    return true;
-  } catch (error) {
-    console.error('Erro ao conectar com Telegram:', error);
-    throw error;
+  const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: CHAT_ID,
+      text: message,
+      parse_mode: 'Markdown'
+    })
+  });
+  const result = await response.json();
+  if (!result.ok) {
+    console.error('Erro Telegram:', result);
   }
+}
+
+function showAlertMessage(message) {
+  const alertDiv = document.createElement('div');
+  alertDiv.className = 'alert-message';
+  alertDiv.textContent = message;
+  
+  document.body.appendChild(alertDiv);
+  
+  setTimeout(() => {
+    if (document.body.contains(alertDiv)) {
+      document.body.removeChild(alertDiv);
+    }
+  }, 2000);
 }
 
 function goBack(){
@@ -381,9 +379,9 @@ function showCategoryProducts(categoryName){
         <img src='${p.imagem}' alt='${p.nome}' onerror="this.src='https://via.placeholder.com/400x200?text=Imagem+Não+Encontrada'"/>
         <h4 style="margin:8px 0 6px 0">${p.nome}</h4>
         <p style="margin:0 0 8px 0">${p.descricao}</p>
-        <div style="display:flex;align-items:center;justify-content:space-between;">
+        <div class="product-card-buttons">
           <button class="btn" onclick='addToCart(${p.id})'>Adicionar ao Carrinho</button>
-          <span style='margin-left:10px; font-weight:bold'>R$ ${p.preco.toFixed(2)}</span>
+          <span class="price">R$ ${p.preco.toFixed(2)}</span>
         </div>
       </div>`;
     });
@@ -409,8 +407,7 @@ function addToCart(id){
     });
   }
   saveToStorage();
-  showCart();
-  alert(`${p.nome} adicionado ao carrinho!`);
+  showAlertMessage(`${p.nome} adicionado ao carrinho!`);
 }
 
 function showCart(){
@@ -754,10 +751,8 @@ function showUploadComprovante(localizacaoData, descricao) {
       };
       
       try {
-        // SALVAR NO FIREBASE
         const pedidoId = await salvarPedidoFirebase(pedido);
         
-        // ENVIAR PARA TELEGRAM
         await sendTelegramNotification(pedido);
         
         userNotifications.push({
@@ -920,7 +915,6 @@ window.openContact = openContact;
 window.openUser = openUser;
 window.goBack = goBack;
 
-// Aguardar Firebase carregar e iniciar
 setTimeout(() => {
   loadFromStorage();
   showHome();
