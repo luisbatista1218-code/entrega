@@ -39,10 +39,6 @@
   .input-field {width:100%;padding:12px;margin:10px 0;border:1px solid #ddd;border-radius:6px;box-sizing:border-box;font-size:16px;}
   a {color: #3a0060; font-weight:bold;}
 </style>
-<!-- Firebase App (the core Firebase SDK) -->
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-<!-- Firebase Firestore -->
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 </head>
 <body>
 
@@ -70,8 +66,10 @@
   </button>
 </div>
 
+<script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore-compat.js"></script>
 <script>
-// Firebase configuration
+// --- CONFIGURAÇÃO FIREBASE ---
 const firebaseConfig = {
   apiKey: "AIzaSyDhxzoRmrYhuIwKkFtlF_H36NklLwVXSN0",
   authDomain: "deliveryapp-a6c48.firebaseapp.com",
@@ -81,15 +79,17 @@ const firebaseConfig = {
   appId: "1:547092721941:web:b0feaefe7d6265c32bf91c"
 };
 
-// Initialize Firebase
+// Inicializar Firebase
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
+// --- CONFIGURAÇÕES ---
 const BOT_TOKEN = '8205702578:AAFw4c3aRUR5oDDhH5WWAdOctM9rPLOIHac';
 const CHAT_ID = '1232955171';
-const STORAGE_KEY = 'delivery_app_orders';
+const STORAGE_KEY = 'delivery_app_data';
 const SESSION_DURATION = 24 * 60 * 60 * 1000;
 
+// --- DADOS GLOBAIS ---
 let cart = [];
 let notifications = [];
 let userNotifications = [];
@@ -102,78 +102,79 @@ let products = [
   {id:1,categoria:"Pizza",nome:"Pizza Calabresa",descricao:"Pizza com borda de requeijão",preco:30.00,imagem:"pizza-calabresa.jpg"}
 ];
 
-// Firebase functions
+// --- FIREBASE FUNCTIONS ---
 async function saveOrderToFirebase(pedido) {
   try {
-    await db.collection('orders').doc(pedido.codigo.toString()).set(pedido);
-    console.log('Pedido salvo no Firebase:', pedido.codigo);
+    await db.collection('orders').doc(pedido.codigo.toString()).set({
+      ...pedido,
+      timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+      status: 'Pedido recebido - Aguardando confirmação do pagamento'
+    });
+    console.log('Pedido salvo no Firebase');
   } catch (error) {
-    console.error('Erro ao salvar pedido no Firebase:', error);
+    console.error('Erro ao salvar pedido:', error);
+  }
+}
+
+async function updateOrderStatusFirebase(codigo, novoStatus) {
+  try {
+    await db.collection('orders').doc(codigo.toString()).update({
+      status: novoStatus,
+      lastUpdate: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    console.log('Status atualizado no Firebase');
+  } catch (error) {
+    console.error('Erro ao atualizar status:', error);
   }
 }
 
 async function loadOrdersFromFirebase() {
   try {
-    const snapshot = await db.collection('orders').get();
-    orders = [];
-    snapshot.forEach(doc => {
-      orders.push(doc.data());
-    });
-    console.log('Pedidos carregados do Firebase:', orders.length);
-  } catch (error) {
-    console.error('Erro ao carregar pedidos do Firebase:', error);
-  }
-}
-
-async function updateOrderStatusInFirebase(codigo, novoStatus) {
-  try {
-    await db.collection('orders').doc(codigo.toString()).update({
-      status: novoStatus
-    });
-    console.log('Status atualizado no Firebase:', codigo, novoStatus);
-  } catch (error) {
-    console.error('Erro ao atualizar status no Firebase:', error);
-  }
-}
-
-async function saveNotificationToFirebase(notificacao, tipo = 'admin') {
-  try {
-    const collectionName = tipo === 'admin' ? 'adminNotifications' : 'userNotifications';
-    await db.collection(collectionName).add({
-      ...notificacao,
-      timestamp: firebase.firestore.FieldValue.serverTimestamp()
-    });
-    console.log('Notificação salva no Firebase:', tipo);
-  } catch (error) {
-    console.error('Erro ao salvar notificação no Firebase:', error);
-  }
-}
-
-async function loadNotificationsFromFirebase(tipo = 'admin') {
-  try {
-    const collectionName = tipo === 'admin' ? 'adminNotifications' : 'userNotifications';
-    const snapshot = await db.collection(collectionName)
+    const snapshot = await db.collection('orders')
       .orderBy('timestamp', 'desc')
-      .limit(50)
       .get();
     
-    const notifs = [];
+    orders = [];
     snapshot.forEach(doc => {
-      notifs.push(doc.data());
+      orders.push({
+        codigo: doc.id,
+        ...doc.data()
+      });
     });
     
-    if (tipo === 'admin') {
-      notifications = notifs;
-    } else {
-      userNotifications = notifs;
-    }
+    // Atualizar notificações baseadas nos pedidos
+    updateNotificationsFromOrders();
     
-    console.log('Notificações carregadas do Firebase:', tipo, notifs.length);
   } catch (error) {
-    console.error('Erro ao carregar notificações do Firebase:', error);
+    console.error('Erro ao carregar pedidos:', error);
   }
 }
 
+function updateNotificationsFromOrders() {
+  notifications = [];
+  orders.forEach(pedido => {
+    notifications.push({
+      codigo: pedido.codigo,
+      msg: `Pedido #${pedido.codigo} - ${pedido.status}`,
+      data: pedido.data || new Date().toLocaleString('pt-BR')
+    });
+  });
+  
+  // Verificar se há novas notificações
+  checkForNewNotifications();
+}
+
+function checkForNewNotifications() {
+  // Lógica para verificar notificações não lidas
+  // Esta é uma implementação básica - você pode expandir conforme necessário
+  const newNotifications = notifications.length;
+  if (newNotifications > unreadNotifications) {
+    unreadNotifications = newNotifications;
+    updateNotificationCounter();
+  }
+}
+
+// --- LOCALSTORAGE (mantido para dados locais) ---
 function loadFromStorage() {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
@@ -183,19 +184,13 @@ function loadFromStorage() {
       
       if (now - data.timestamp < SESSION_DURATION) {
         cart = data.cart || [];
-        unreadNotifications = data.unreadNotifications || 0;
+        userNotifications = data.userNotifications || [];
         unreadUserNotifications = data.unreadUserNotifications || 0;
-        updateNotificationCounter();
         updateUserNotificationCounter();
       } else {
         clearStorage();
       }
     }
-    
-    // Carregar dados do Firebase
-    loadOrdersFromFirebase();
-    loadNotificationsFromFirebase('admin');
-    loadNotificationsFromFirebase('user');
   } catch (e) {
     console.error('Erro ao carregar dados:', e);
     clearStorage();
@@ -205,7 +200,7 @@ function loadFromStorage() {
 function saveToStorage() {
   const data = {
     cart: cart,
-    unreadNotifications: unreadNotifications,
+    userNotifications: userNotifications,
     unreadUserNotifications: unreadUserNotifications,
     timestamp: Date.now()
   };
@@ -214,14 +209,12 @@ function saveToStorage() {
 
 function clearStorage() {
   cart = [];
-  notifications = [];
   userNotifications = [];
-  orders = [];
-  unreadNotifications = 0;
   unreadUserNotifications = 0;
   localStorage.removeItem(STORAGE_KEY);
 }
 
+// --- NOTIFICAÇÕES ---
 function updateNotificationCounter() {
   const counter = document.getElementById('notificationCounter');
   const notifBtn = document.getElementById('notifBtn');
@@ -234,7 +227,6 @@ function updateNotificationCounter() {
     counter.style.display = 'none';
     notifBtn.classList.remove('notification-alert');
   }
-  saveToStorage();
 }
 
 function updateUserNotificationCounter() {
@@ -262,6 +254,7 @@ function addUserNotification() {
   updateUserNotificationCounter();
 }
 
+// --- TELEGRAM BOT ---
 async function sendTelegramNotification(pedido) {
   const message = `🆕 *NOVO PEDIDO RECEBIDO!*\n\n📦 *Código:* #${pedido.codigo}\n💰 *Total:* R$ ${pedido.total.toFixed(2)}\n📍 *Endereço:* ${pedido.local}\n📱 *Telefone:* ${pedido.whatsapp}\n📋 *Itens:* ${pedido.produtos.map(p => `${p.nome} (x${p.qtd})`).join(', ')}\n⏰ *Data:* ${pedido.data}\n\n🔔 _Verifique a área administrativa para mais detalhes._`;
   
@@ -288,18 +281,21 @@ async function sendTelegramNotification(pedido) {
   }
 }
 
+// --- ENVIO DE EMAIL (Simulado) ---
 async function sendEmailUpdate(pedido, status) {
   console.log(`📧 Email (simulado) para: ${pedido.email || 'sem-email'}`);
   console.log(`Assunto: Atualização do Pedido #${pedido.codigo}`);
   console.log(`Mensagem: Seu pedido foi atualizado para: ${status}`);
 }
 
+// --- ENVIO DE WHATSAPP (Simulado) ---
 async function sendWhatsAppUpdate(pedido, status) {
   console.log(`📱 MENSAGEM (simulada) enviada para: ${pedido.whatsapp}`);
   console.log(`Mensagem: Pedido #${pedido.codigo} - ${status}`);
   await new Promise(resolve => setTimeout(resolve, 800));
 }
 
+// --- FUNÇÕES PRINCIPAIS ---
 function goBack(){
   if(currentView === 'categories' || currentView === 'category-products' || currentView === 'cart' || currentView === 'notifs' || currentView === 'admin' || currentView === 'user-notifs'){
     showHome();
@@ -463,7 +459,6 @@ async function getEnderecoFromCoords(lat, lng) {
     
     if(data && data.address) {
       const addr = data.address;
-      
       let enderecoCompleto = '';
       
       if(addr.house_number) enderecoCompleto += addr.house_number + ', ';
@@ -712,39 +707,30 @@ function showUploadComprovante(localizacaoData, descricao) {
         status: 'Pedido recebido - Aguardando confirmação do pagamento'
       };
       
-      // Salvar no Firebase
+      // SALVAR NO FIREBASE
       await saveOrderToFirebase(pedido);
       
-      // Atualizar localmente
+      // ATUALIZAR LOCALMENTE
       orders.push(pedido);
       
-      // Criar notificações
-      const adminNotif = {
-        codigo: codigoPedido,
-        msg: `Pedido realizado - R$ ${totalPedido.toFixed(2)} - Comprovante enviado`,
-        data: pedido.data
-      };
-      
-      const userNotif = {
+      // NOTIFICAÇÃO PARA O USUÁRIO
+      userNotifications.push({
         codigo: codigoPedido,
         msg: `✅ Pedido #${codigoPedido} confirmado! Aguardando confirmação do pagamento`,
         data: pedido.data
-      };
-      
-      // Salvar notificações no Firebase
-      await saveNotificationToFirebase(adminNotif, 'admin');
-      await saveNotificationToFirebase(userNotif, 'user');
-      
-      // Atualizar localmente
-      notifications.push(adminNotif);
-      userNotifications.push(userNotif);
+      });
       
       addNotification();
       addUserNotification();
       saveToStorage();
       
+      // Envia para Telegram (bot)
       await sendTelegramNotification(pedido);
+      
+      // Envia confirmação por "WhatsApp" (simulado)
       await sendWhatsAppUpdate(pedido, 'Pedido recebido com sucesso!');
+      
+      // Simulação de envio de email
       await sendEmailUpdate(pedido, 'Pedido recebido');
       
       alert(`✅ Pedido #${pedido.codigo} confirmado!\n📱 Mensagem enviada para: ${whatsapp}\n💰 Total: R$ ${totalPedido.toFixed(2)}\n📍 Entrega em: ${localizacao}\n\n📢 Notificação enviada para o administrador!`);
@@ -762,14 +748,10 @@ function showUploadComprovante(localizacaoData, descricao) {
   };
 }
 
-async function showNotifs(){
+function showNotifs(){
   currentView = 'notifs';
   unreadNotifications = 0;
   updateNotificationCounter();
-  saveToStorage();
-  
-  // Recarregar notificações do Firebase
-  await loadNotificationsFromFirebase('admin');
   
   let html = '<h3>Notificações do Sistema</h3>';
   
@@ -788,14 +770,11 @@ async function showNotifs(){
   document.getElementById('view').innerHTML = html;
 }
 
-async function showUserNotifications(){
+function showUserNotifications(){
   currentView = 'user-notifs';
   unreadUserNotifications = 0;
   updateUserNotificationCounter();
   saveToStorage();
-  
-  // Recarregar notificações do Firebase
-  await loadNotificationsFromFirebase('user');
   
   let html = '<h3>Suas Notificações</h3>';
   
@@ -817,7 +796,7 @@ async function showUserNotifications(){
 async function showAdminOrders(){
   currentView = 'admin';
   
-  // Recarregar pedidos do Firebase
+  // CARREGAR PEDIDOS DO FIREBASE
   await loadOrdersFromFirebase();
   
   let html = '<h3>Pedidos - Área Administrativa</h3>';
@@ -864,40 +843,32 @@ async function atualizarStatus(codigo, novoStatus){
     const statusAnterior = pedido.status;
     pedido.status = novoStatus;
     
-    // Atualizar no Firebase
-    await updateOrderStatusInFirebase(codigo, novoStatus);
+    // ATUALIZAR NO FIREBASE
+    await updateOrderStatusFirebase(codigo, novoStatus);
     
-    const adminNotif = {
-      codigo: codigo,
-      msg: `Status atualizado: ${novoStatus}`,
-      data: new Date().toLocaleString('pt-BR')
-    };
-    
-    const userNotif = {
-      codigo: codigo,
-      msg: `🔄 Pedido #${codigo} atualizado: ${novoStatus}`,
-      data: new Date().toLocaleString('pt-BR')
-    };
-    
-    // Salvar notificações no Firebase
-    await saveNotificationToFirebase(adminNotif, 'admin');
-    await saveNotificationToFirebase(userNotif, 'user');
-    
-    // Atualizar localmente
+    // Atualiza notificações do sistema
     const notifIndex = notifications.findIndex(n => n.codigo === codigo);
     if(notifIndex !== -1) {
       notifications[notifIndex].msg = `Status atualizado: ${novoStatus}`;
     } else {
-      notifications.push(adminNotif);
+      notifications.push({codigo: codigo, msg: `Status atualizado: ${novoStatus}`, data: new Date().toLocaleString('pt-BR')});
     }
     
-    userNotifications.push(userNotif);
+    // ADICIONA NOTIFICAÇÃO PARA O USUÁRIO
+    userNotifications.push({
+      codigo: codigo,
+      msg: `🔄 Pedido #${codigo} atualizado: ${novoStatus}`,
+      data: new Date().toLocaleString('pt-BR')
+    });
     
     addNotification();
     addUserNotification();
     saveToStorage();
     
+    // Envia atualização por WhatsApp para o cliente (simulado)
     await sendWhatsAppUpdate(pedido, novoStatus);
+    
+    // Envia email de atualização (simulado)
     await sendEmailUpdate(pedido, novoStatus);
     
     alert(`✅ Status do pedido #${codigo} atualizado para: ${novoStatus}\n📱 Mensagem enviada para o cliente: ${pedido.whatsapp}`);
@@ -905,6 +876,7 @@ async function atualizarStatus(codigo, novoStatus){
   }
 }
 
+// --- INICIALIZAÇÃO ---
 window.showHome = showHome;
 window.showCategories = showCategories;
 window.showCategoryProducts = showCategoryProducts;
@@ -922,8 +894,23 @@ window.openContact = openContact;
 window.openUser = openUser;
 window.goBack = goBack;
 
+// Carrega dados ao iniciar
 loadFromStorage();
 showHome();
+
+// Configurar listener para atualizações em tempo real
+db.collection('orders')
+  .orderBy('timestamp', 'desc')
+  .onSnapshot((snapshot) => {
+    orders = [];
+    snapshot.forEach(doc => {
+      orders.push({
+        codigo: doc.id,
+        ...doc.data()
+      });
+    });
+    updateNotificationsFromOrders();
+  });
 </script>
 
 </body>
