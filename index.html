@@ -38,6 +38,7 @@
   }
   .input-field {width:100%;padding:12px;margin:10px 0;border:1px solid #ddd;border-radius:6px;box-sizing:border-box;font-size:16px;}
   a {color: #3a0060; font-weight:bold;}
+  .finalizar-btn-container {position: sticky; bottom: 70px; background: #1c0035; padding: 15px; margin: -12px; margin-top: 20px;}
 </style>
 </head>
 <body>
@@ -46,10 +47,7 @@
   <button onclick="goBack()">← Voltar</button>
   <button onclick="openContact()">Contato</button>
   <strong>Delivery</strong>
-  <button id="userNotifBtn" class="notification-btn" onclick="openUser()">
-    Usuário/Admin
-    <span id="userNotificationCounter" class="notification-badge" style="display: none">0</span>
-  </button>
+  <button onclick="exportarNotaFiscal()">📄 Nota Fiscal</button>
 </div>
 
 <div class="main">
@@ -66,23 +64,7 @@
   </button>
 </div>
 
-<script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore-compat.js"></script>
 <script>
-// --- CONFIGURAÇÃO FIREBASE ---
-const firebaseConfig = {
-  apiKey: "AIzaSyDhxzoRmrYhuIwKkFtlF_H36NklLwVXSN0",
-  authDomain: "deliveryapp-a6c48.firebaseapp.com",
-  projectId: "deliveryapp-a6c48",
-  storageBucket: "deliveryapp-a6c48.firebasestorage.app",
-  messagingSenderId: "547092721941",
-  appId: "1:547092721941:web:b0feaefe7d6265c32bf91c"
-};
-
-// Inicializar Firebase
-firebase.initializeApp(firebaseConfig);
-const db = firebase.firestore();
-
 // --- CONFIGURAÇÕES ---
 const BOT_TOKEN = '8205702578:AAFw4c3aRUR5oDDhH5WWAdOctM9rPLOIHac';
 const CHAT_ID = '1232955171';
@@ -92,136 +74,13 @@ const SESSION_DURATION = 24 * 60 * 60 * 1000;
 // --- DADOS GLOBAIS ---
 let cart = [];
 let notifications = [];
-let userNotifications = [];
 let orders = [];
 let currentView = 'home';
 let unreadNotifications = 0;
-let unreadUserNotifications = 0;
 let categories = ["Pizza", "Bebidas", "Sobremesas"];
 let products = [
   {id:1,categoria:"Pizza",nome:"Pizza Calabresa",descricao:"Pizza com borda de requeijão",preco:30.00,imagem:"pizza-calabresa.jpg"}
 ];
-
-// --- FIREBASE FUNCTIONS ---
-async function saveOrderToFirebase(pedido) {
-  try {
-    await db.collection('orders').doc(pedido.codigo.toString()).set({
-      ...pedido,
-      timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-      status: 'Pedido recebido - Aguardando confirmação do pagamento'
-    });
-    console.log('Pedido salvo no Firebase');
-    return true;
-  } catch (error) {
-    console.error('Erro ao salvar pedido:', error);
-    return false;
-  }
-}
-
-async function updateOrderStatusFirebase(codigo, novoStatus) {
-  try {
-    await db.collection('orders').doc(codigo.toString()).update({
-      status: novoStatus,
-      lastUpdate: firebase.firestore.FieldValue.serverTimestamp()
-    });
-    console.log('Status atualizado no Firebase');
-    return true;
-  } catch (error) {
-    console.error('Erro ao atualizar status:', error);
-    return false;
-  }
-}
-
-async function loadOrdersFromFirebase() {
-  try {
-    const snapshot = await db.collection('orders')
-      .orderBy('timestamp', 'desc')
-      .get();
-    
-    orders = [];
-    snapshot.forEach(doc => {
-      const data = doc.data();
-      orders.push({
-        codigo: doc.id,
-        ...data
-      });
-    });
-    
-    updateNotificationsFromOrders();
-    return true;
-  } catch (error) {
-    console.error('Erro ao carregar pedidos:', error);
-    return false;
-  }
-}
-
-function updateNotificationsFromOrders() {
-  notifications = [];
-  orders.forEach(pedido => {
-    notifications.push({
-      codigo: pedido.codigo,
-      msg: `Pedido #${pedido.codigo} - ${pedido.status}`,
-      data: pedido.data || new Date().toLocaleString('pt-BR')
-    });
-  });
-  
-  checkForNewNotifications();
-}
-
-function checkForNewNotifications() {
-  const newNotifications = notifications.length;
-  if (newNotifications > unreadNotifications) {
-    unreadNotifications = newNotifications;
-    updateNotificationCounter();
-  }
-}
-
-// --- TELEGRAM CORRIGIDO ---
-async function sendTelegramNotification(pedido) {
-  const message = `NOVO PEDIDO RECEBIDO!\n\nCódigo: #${pedido.codigo}\nTotal: R$ ${pedido.total.toFixed(2)}\nEndereço: ${pedido.local}\nTelefone: ${pedido.whatsapp}\nItens: ${pedido.produtos.map(p => `${p.nome} (x${p.qtd})`).join(', ')}\nData: ${pedido.data}\n\nVerifique a área administrativa.`;
-  
-  try {
-    const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
-    
-    const formData = new URLSearchParams();
-    formData.append('chat_id', CHAT_ID);
-    formData.append('text', message);
-    
-    const response = await fetch(url, {
-      method: 'POST',
-      body: formData,
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-    });
-    
-    const result = await response.json();
-    console.log('Resposta Telegram:', result);
-    
-    if (!result.ok) {
-      console.error('Erro detalhado Telegram:', result);
-      await sendTelegramAlternative(pedido);
-    }
-    return true;
-  } catch (error) {
-    console.error('Erro ao conectar com Telegram:', error);
-    await sendTelegramAlternative(pedido);
-    return false;
-  }
-}
-
-async function sendTelegramAlternative(pedido) {
-  const message = `Pedido #${pedido.codigo} - R$ ${pedido.total.toFixed(2)} - ${pedido.whatsapp}`;
-  const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage?chat_id=${CHAT_ID}&text=${encodeURIComponent(message)}`;
-  
-  try {
-    await fetch(url);
-    return true;
-  } catch (error) {
-    console.error('Método alternativo também falhou:', error);
-    return false;
-  }
-}
 
 // --- LOCALSTORAGE ---
 function loadFromStorage() {
@@ -233,9 +92,10 @@ function loadFromStorage() {
       
       if (now - data.timestamp < SESSION_DURATION) {
         cart = data.cart || [];
-        userNotifications = data.userNotifications || [];
-        unreadUserNotifications = data.unreadUserNotifications || 0;
-        updateUserNotificationCounter();
+        notifications = data.notifications || [];
+        orders = data.orders || [];
+        unreadNotifications = data.unreadNotifications || 0;
+        updateNotificationCounter();
       } else {
         clearStorage();
       }
@@ -249,8 +109,9 @@ function loadFromStorage() {
 function saveToStorage() {
   const data = {
     cart: cart,
-    userNotifications: userNotifications,
-    unreadUserNotifications: unreadUserNotifications,
+    notifications: notifications,
+    orders: orders,
+    unreadNotifications: unreadNotifications,
     timestamp: Date.now()
   };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
@@ -258,8 +119,9 @@ function saveToStorage() {
 
 function clearStorage() {
   cart = [];
-  userNotifications = [];
-  unreadUserNotifications = 0;
+  notifications = [];
+  orders = [];
+  unreadNotifications = 0;
   localStorage.removeItem(STORAGE_KEY);
 }
 
@@ -276,20 +138,6 @@ function updateNotificationCounter() {
     counter.style.display = 'none';
     notifBtn.classList.remove('notification-alert');
   }
-}
-
-function updateUserNotificationCounter() {
-  const counter = document.getElementById('userNotificationCounter');
-  const notifBtn = document.getElementById('userNotifBtn');
-  
-  if (unreadUserNotifications > 0) {
-    counter.style.display = 'flex';
-    counter.textContent = unreadUserNotifications > 99 ? '99+' : unreadUserNotifications;
-    notifBtn.classList.add('notification-alert');
-  } else {
-    counter.style.display = 'none';
-    notifBtn.classList.remove('notification-alert');
-  }
   saveToStorage();
 }
 
@@ -298,30 +146,140 @@ function addNotification() {
   updateNotificationCounter();
 }
 
-function addUserNotification() {
-  unreadUserNotifications++;
-  updateUserNotificationCounter();
+// --- TELEGRAM BOT ---
+async function sendTelegramNotification(pedido) {
+  const message = `🆕 *NOVO PEDIDO RECEBIDO!*\n\n📦 *Código:* #${pedido.codigo}\n💰 *Total:* R$ ${pedido.total.toFixed(2)}\n📍 *Endereço:* ${pedido.local}\n📱 *Telefone:* ${pedido.whatsapp}\n\n💎 *COMANDOS DISPONÍVEIS:*\n/status${pedido.codigo} pago\n/status${pedido.codigo} preparando\n/status${pedido.codigo} entrega\n/status${pedido.codigo} entregue\n/status${pedido.codigo} cancelado\n\n📋 *Itens:* ${pedido.produtos.map(p => `${p.nome} (x${p.qtd})`).join(', ')}`;
+
+  try {
+    // Envia mensagem do pedido
+    const messageUrl = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
+    const messageResponse = await fetch(messageUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        chat_id: CHAT_ID,
+        text: message,
+        parse_mode: 'Markdown'
+      })
+    });
+
+    const messageResult = await messageResponse.json();
+    
+    // Se tem comprovante, envia como documento
+    if (pedido.comprovante) {
+      await sendComprovanteToTelegram(pedido);
+    }
+
+    if (!messageResult.ok) {
+      console.error('Erro Telegram:', messageResult);
+    }
+  } catch (error) {
+    console.error('Erro ao conectar com Telegram:', error);
+  }
 }
 
-// --- ENVIO DE EMAIL (Simulado) ---
-async function sendEmailUpdate(pedido, status) {
-  console.log(`📧 Email (simulado) para: ${pedido.whatsapp}`);
-  console.log(`Assunto: Atualização do Pedido #${pedido.codigo}`);
-  console.log(`Mensagem: Seu pedido foi atualizado para: ${status}`);
-  return true;
+async function sendComprovanteToTelegram(pedido) {
+  try {
+    // Converte base64 para blob
+    const base64Data = pedido.comprovante.split(',')[1];
+    const binaryString = atob(base64Data);
+    const bytes = new Uint8Array(binaryString.length);
+    
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    
+    const blob = new Blob([bytes], { type: pedido.comprovanteTipo });
+    const formData = new FormData();
+    formData.append('chat_id', CHAT_ID);
+    formData.append('document', blob, pedido.comprovanteNome);
+    formData.append('caption', `📎 COMPROVANTE PEDIDO #${pedido.codigo}\n💳 Valor: R$ ${pedido.total.toFixed(2)}\n📱 Cliente: ${pedido.whatsapp}`);
+
+    const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendDocument`;
+    const response = await fetch(url, {
+      method: 'POST',
+      body: formData
+    });
+
+    const result = await response.json();
+    if (!result.ok) {
+      console.error('Erro ao enviar comprovante:', result);
+    }
+  } catch (error) {
+    console.error('Erro ao enviar comprovante para Telegram:', error);
+  }
 }
 
-// --- ENVIO DE WHATSAPP (Simulado) ---
-async function sendWhatsAppUpdate(pedido, status) {
-  console.log(`📱 MENSAGEM (simulada) enviada para: ${pedido.whatsapp}`);
-  console.log(`Mensagem: Pedido #${pedido.codigo} - ${status}`);
-  await new Promise(resolve => setTimeout(resolve, 800));
-  return true;
+// --- NOTA FISCAL ---
+function gerarNotaFiscal(pedido) {
+  return {
+    codigo: pedido.codigo,
+    data: pedido.data,
+    cliente: {
+      telefone: pedido.whatsapp,
+      endereco: pedido.local
+    },
+    itens: pedido.produtos.map(item => ({
+      nome: item.nome,
+      quantidade: item.qtd,
+      preco_unitario: item.preco,
+      subtotal: item.preco * item.qtd
+    })),
+    totais: {
+      subtotal: pedido.produtos.reduce((sum, item) => sum + (item.preco * item.qtd), 0),
+      total: pedido.total
+    },
+    status: pedido.status,
+    comprovante: pedido.comprovante ? "Enviado" : "Não enviado"
+  };
+}
+
+function exportarNotaFiscal() {
+  if (orders.length === 0) {
+    alert('Nenhum pedido encontrado!');
+    return;
+  }
+  
+  const notasFiscais = orders.map(pedido => gerarNotaFiscal(pedido));
+  const dataStr = JSON.stringify(notasFiscais, null, 2);
+  const dataBlob = new Blob([dataStr], {type: 'application/json'});
+  
+  const url = URL.createObjectURL(dataBlob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `notas-fiscais-${new Date().toISOString().split('T')[0]}.json`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function baixarNotaFiscalIndividual(codigo) {
+  const pedido = orders.find(o => o.codigo === codigo);
+  if (!pedido) {
+    alert('Pedido não encontrado!');
+    return;
+  }
+  
+  const notaFiscal = gerarNotaFiscal(pedido);
+  const dataStr = JSON.stringify(notaFiscal, null, 2);
+  const dataBlob = new Blob([dataStr], {type: 'application/json'});
+  
+  const url = URL.createObjectURL(dataBlob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `nota-fiscal-${codigo}.json`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
 
 // --- FUNÇÕES PRINCIPAIS ---
 function goBack(){
-  if(currentView === 'categories' || currentView === 'category-products' || currentView === 'cart' || currentView === 'notifs' || currentView === 'admin' || currentView === 'user-notifs'){
+  if(currentView === 'categories' || currentView === 'category-products' || currentView === 'cart' || currentView === 'notifs'){
     showHome();
   } else if(currentView === 'product-list'){
     showCategories();
@@ -330,21 +288,6 @@ function goBack(){
 
 function openContact(){ 
   alert("Telefone: (11) 99999-9999\nEmail: contato@delivery.com\nChave PIX: 123.456.789-00"); 
-}
-
-function openUser(){
-  let tipo = prompt("Digite 'admin' para acessar admin, deixe vazio para usuário:");
-  if(tipo && tipo.toLowerCase()==='admin'){
-    let email = prompt("Email:");
-    let senha = prompt("Senha:");
-    if(email==="admin@local" && senha==="admin123"){ 
-      showAdminOrders(); 
-    } else {
-      alert("Credenciais inválidas");
-    }
-  } else {
-    showUserNotifications();
-  }
 }
 
 function showHome(){
@@ -439,7 +382,9 @@ function showCart(){
     html += `
       <div class='card'>
         <h3>Total: R$ ${total.toFixed(2)}</h3>
-        <button onclick='startCheckout()' class="btn">Finalizar Pedido</button>
+        <div class="finalizar-btn-container">
+          <button onclick='startCheckout()' class="btn" style="width: 100%; padding: 15px; font-size: 18px;">✅ Finalizar Pedido</button>
+        </div>
         <button onclick='clearCart()' class="btn-ghost">Limpar Carrinho</button>
       </div>`;
   }
@@ -639,10 +584,10 @@ function showUploadComprovante(localizacaoData, descricao) {
       
       <div id="fileInfo"></div>
       
-      <div style="margin-top: 15px;">
-        <button class="btn" id="submitBtn" disabled onclick="finalizarPedidoComComprovante('${localizacaoData.endereco.replace(/'/g, "\\'")}', '${(descricao || '').replace(/'/g, "\\'")}', '${localizacaoData.mapaUrl.replace(/'/g, "\\'")}', '${localizacaoData.whatsapp.replace(/'/g, "\\'")}')">✅ Finalizar Pedido</button>
-        <button class="btn-ghost" onclick="showDadosEntrega({endereco: '${localizacaoData.endereco.replace(/'/g, "\\'")}', mapaUrl: '${localizacaoData.mapaUrl.replace(/'/g, "\\'")}'})">← Voltar</button>
+      <div class="finalizar-btn-container">
+        <button class="btn" id="submitBtn" disabled onclick="finalizarPedidoComComprovante('${localizacaoData.endereco.replace(/'/g, "\\'")}', '${(descricao || '').replace(/'/g, "\\'")}', '${localizacaoData.mapaUrl.replace(/'/g, "\\'")}', '${localizacaoData.whatsapp.replace(/'/g, "\\'")}')" style="width: 100%; padding: 15px; font-size: 18px;">✅ Finalizar Pedido</button>
       </div>
+      <button class="btn-ghost" onclick="showDadosEntrega({endereco: '${localizacaoData.endereco.replace(/'/g, "\\'")}', mapaUrl: '${localizacaoData.mapaUrl.replace(/'/g, "\\'")}'})">← Voltar</button>
     </div>
   `;
   
@@ -731,41 +676,24 @@ function showUploadComprovante(localizacaoData, descricao) {
         status: 'Pedido recebido - Aguardando confirmação do pagamento'
       };
       
-      // SALVAR NO FIREBASE
-      const firebaseSuccess = await saveOrderToFirebase(pedido);
+      orders.push(pedido);
+      notifications.push({
+        codigo: codigoPedido,
+        msg: `Pedido #${codigoPedido} realizado - R$ ${totalPedido.toFixed(2)} - Status: Aguardando pagamento`,
+        data: pedido.data,
+        notaFiscal: gerarNotaFiscal(pedido)
+      });
       
-      if (firebaseSuccess) {
-        // ATUALIZAR LOCALMENTE
-        orders.push(pedido);
-        
-        // NOTIFICAÇÃO PARA O USUÁRIO
-        userNotifications.push({
-          codigo: codigoPedido,
-          msg: `✅ Pedido #${codigoPedido} confirmado! Aguardando confirmação do pagamento`,
-          data: pedido.data
-        });
-        
-        addNotification();
-        addUserNotification();
-        saveToStorage();
-        
-        // ENVIAR PARA TELEGRAM
-        const telegramSuccess = await sendTelegramNotification(pedido);
-        
-        // Envia confirmação por "WhatsApp" (simulado)
-        await sendWhatsAppUpdate(pedido, 'Pedido recebido com sucesso!');
-        
-        // Simulação de envio de email
-        await sendEmailUpdate(pedido, 'Pedido recebido');
-        
-        alert(`✅ Pedido #${pedido.codigo} confirmado!\n📱 Mensagem enviada para: ${whatsapp}\n💰 Total: R$ ${totalPedido.toFixed(2)}\n📍 Entrega em: ${localizacao}\n\n📢 ${telegramSuccess ? 'Notificação enviada para o administrador!' : 'Erro ao enviar notificação'}`);
-        
-        cart = [];
-        saveToStorage();
-        showHome();
-      } else {
-        alert('❌ Erro ao salvar pedido. Tente novamente.');
-      }
+      addNotification();
+      saveToStorage();
+      
+      await sendTelegramNotification(pedido);
+      
+      alert(`✅ Pedido #${pedido.codigo} confirmado!\n📱 Notificação enviada para o administrador\n💰 Total: R$ ${totalPedido.toFixed(2)}\n📍 Entrega em: ${localizacao}\n\n💎 Use o botão "Nota Fiscal" para baixar seus pedidos!`);
+      
+      cart = [];
+      saveToStorage();
+      showHome();
     };
     
     reader.onerror = function() {
@@ -780,8 +708,9 @@ function showNotifs(){
   currentView = 'notifs';
   unreadNotifications = 0;
   updateNotificationCounter();
+  saveToStorage();
   
-  let html = '<h3>Notificações do Sistema</h3>';
+  let html = '<h3>Notificações dos Pedidos</h3>';
   
   if(notifications.length === 0){ 
     html += '<p>Nenhuma notificação.</p>';
@@ -791,121 +720,12 @@ function showNotifs(){
         <b>Pedido #${notif.codigo}</b>
         <div>${notif.msg}</div>
         <small>${notif.data}</small>
+        <button class="btn" onclick="baixarNotaFiscalIndividual(${notif.codigo})" style="margin-top: 10px;">📄 Baixar Nota Fiscal</button>
       </div>`;
     });
   }
   
   document.getElementById('view').innerHTML = html;
-}
-
-function showUserNotifications(){
-  currentView = 'user-notifs';
-  unreadUserNotifications = 0;
-  updateUserNotificationCounter();
-  saveToStorage();
-  
-  let html = '<h3>Suas Notificações</h3>';
-  
-  if(userNotifications.length === 0){ 
-    html += '<p>Nenhuma notificação.</p>';
-  } else {
-    userNotifications.slice().reverse().forEach(notif => {
-      html += `<div class='card'>
-        <b>Pedido #${notif.codigo}</b>
-        <div>${notif.msg}</div>
-        <small>${notif.data}</small>
-      </div>`;
-    });
-  }
-  
-  document.getElementById('view').innerHTML = html;
-}
-
-async function showAdminOrders(){
-  currentView = 'admin';
-  
-  // CARREGAR PEDIDOS DO FIREBASE
-  await loadOrdersFromFirebase();
-  
-  let html = '<h3>Pedidos - Área Administrativa</h3>';
-  
-  if(orders.length === 0){ 
-    html += '<p>Nenhum pedido realizado.</p>';
-  } else {
-    orders.slice().reverse().forEach(pedido => {
-      const comprovanteHtml = pedido.comprovante ? 
-        `<p><strong>Comprovante:</strong> 
-          <a href="${pedido.comprovante}" target="_blank" download="comprovante_${pedido.codigo}.${pedido.comprovanteTipo === 'application/pdf' ? 'pdf' : 'jpg'}">
-            📎 Ver Comprovante (${pedido.comprovanteNome})
-          </a>
-        </p>` : 
-        '<p><strong>Comprovante:</strong> ❌ Não enviado</p>';
-      
-      const mapaHtml = pedido.mapaUrl ? 
-        `<p><strong>📍 Mapa:</strong> <a href="${pedido.mapaUrl}" target="_blank">Abrir localização</a></p>` : 
-        '';
-      
-      html += `<div class='card'>
-        <h4>Pedido #${pedido.codigo}</h4>
-        <p><strong>📱 Telefone:</strong> ${pedido.whatsapp}</p>
-        <p><strong>Status:</strong> ${pedido.status}</p>
-        <p><strong>Data:</strong> ${pedido.data}</p>
-        <p><strong>Endereço:</strong> ${pedido.local}</p>
-        ${mapaHtml}
-        <p><strong>Total:</strong> R$ ${pedido.total.toFixed(2)}</p>
-        ${comprovanteHtml}
-        <p><strong>Itens:</strong> ${pedido.produtos.map(p => `${p.nome} (x${p.qtd})`).join(', ')}</p>
-        <button class="btn" onclick='atualizarStatus(${pedido.codigo},"Pagamento confirmado - Preparando pedido")'>✅ Confirmar Pagamento</button>
-        <button class="btn" onclick='atualizarStatus(${pedido.codigo},"Pedido em rota de entrega")'>🚚 Saiu para Entrega</button>
-        <button class="btn" onclick='atualizarStatus(${pedido.codigo},"Pedido entregue")'>🎉 Entregue</button>
-      </div>`;
-    });
-  }
-  
-  document.getElementById('view').innerHTML = html;
-}
-
-async function atualizarStatus(codigo, novoStatus){
-  let pedido = orders.find(o => o.codigo === codigo);
-  if(pedido){
-    const statusAnterior = pedido.status;
-    pedido.status = novoStatus;
-    
-    // ATUALIZAR NO FIREBASE
-    const firebaseSuccess = await updateOrderStatusFirebase(codigo, novoStatus);
-    
-    if (firebaseSuccess) {
-      // Atualiza notificações do sistema
-      const notifIndex = notifications.findIndex(n => n.codigo === codigo);
-      if(notifIndex !== -1) {
-        notifications[notifIndex].msg = `Status atualizado: ${novoStatus}`;
-      } else {
-        notifications.push({codigo: codigo, msg: `Status atualizado: ${novoStatus}`, data: new Date().toLocaleString('pt-BR')});
-      }
-      
-      // ADICIONA NOTIFICAÇÃO PARA O USUÁRIO
-      userNotifications.push({
-        codigo: codigo,
-        msg: `🔄 Pedido #${codigo} atualizado: ${novoStatus}`,
-        data: new Date().toLocaleString('pt-BR')
-      });
-      
-      addNotification();
-      addUserNotification();
-      saveToStorage();
-      
-      // Envia atualização por WhatsApp para o cliente (simulado)
-      await sendWhatsAppUpdate(pedido, novoStatus);
-      
-      // Envia email de atualização (simulado)
-      await sendEmailUpdate(pedido, novoStatus);
-      
-      alert(`✅ Status do pedido #${codigo} atualizado para: ${novoStatus}\n📱 Mensagem enviada para o cliente: ${pedido.whatsapp}`);
-      showAdminOrders();
-    } else {
-      alert('❌ Erro ao atualizar status no banco de dados.');
-    }
-  }
 }
 
 // --- INICIALIZAÇÃO ---
@@ -914,37 +734,19 @@ window.showCategories = showCategories;
 window.showCategoryProducts = showCategoryProducts;
 window.showCart = showCart;
 window.showNotifs = showNotifs;
-window.showUserNotifications = showUserNotifications;
 window.addToCart = addToCart;
 window.incQty = incQty;
 window.decQty = decQty;
 window.clearCart = clearCart;
 window.startCheckout = startCheckout;
-window.showAdminOrders = showAdminOrders;
-window.atualizarStatus = atualizarStatus;
 window.openContact = openContact;
-window.openUser = openUser;
 window.goBack = goBack;
+window.exportarNotaFiscal = exportarNotaFiscal;
+window.baixarNotaFiscalIndividual = baixarNotaFiscalIndividual;
 
 // Carrega dados ao iniciar
 loadFromStorage();
 showHome();
-
-// Configurar listener para atualizações em tempo real do Firebase
-db.collection('orders')
-  .orderBy('timestamp', 'desc')
-  .onSnapshot((snapshot) => {
-    orders = [];
-    snapshot.forEach(doc => {
-      const data = doc.data();
-      orders.push({
-        codigo: doc.id,
-        ...data
-      });
-    });
-    updateNotificationsFromOrders();
-    console.log('Pedidos atualizados em tempo real:', orders.length);
-  });
 </script>
 
 </body>
