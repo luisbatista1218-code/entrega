@@ -65,13 +65,11 @@
 </div>
 
 <script>
-// --- CONFIGURAÇÕES ---
 const BOT_TOKEN = '8205702578:AAFw4c3aRUR5oDDhH5WWAdOctM9rPLOIHac';
 const CHAT_ID = '1232955171';
 const STORAGE_KEY = 'delivery_app_data';
 const SESSION_DURATION = 24 * 60 * 60 * 1000;
 
-// --- DADOS GLOBAIS ---
 let cart = [];
 let notifications = [];
 let orders = [];
@@ -81,8 +79,71 @@ let categories = ["Pizza", "Bebidas", "Sobremesas"];
 let products = [
   {id:1,categoria:"Pizza",nome:"Pizza Calabresa",descricao:"Pizza com borda de requeijão",preco:30.00,imagem:"pizza-calabresa.jpg"}
 ];
+let lastUpdateId = 0;
 
-// --- LOCALSTORAGE ---
+async function checkTelegramUpdates() {
+  try {
+    const url = `https://api.telegram.org/bot${BOT_TOKEN}/getUpdates?offset=${lastUpdateId + 1}`;
+    const response = await fetch(url);
+    const data = await response.json();
+    
+    if (data.ok && data.result.length > 0) {
+      data.result.forEach(update => {
+        if (update.message && update.message.text) {
+          const text = update.message.text;
+          if (text.startsWith('/status')) {
+            processarComandoStatus(text, update.message.from.first_name);
+          }
+        }
+        lastUpdateId = update.update_id;
+      });
+    }
+  } catch (error) {
+    console.error('Erro ao verificar atualizações:', error);
+  }
+}
+
+function processarComandoStatus(text, adminNome) {
+  const match = text.match(/\/status(\d+)\s+(\w+)/);
+  if (match) {
+    const codigo = parseInt(match[1]);
+    const status = match[2].toLowerCase();
+    const statusMap = {
+      'pago': '✅ Pagamento confirmado',
+      'preparando': '👨‍🍳 Preparando pedido', 
+      'entrega': '🚚 Saiu para entrega',
+      'entregue': '🎉 Pedido entregue',
+      'cancelado': '❌ Pedido cancelado'
+    };
+    
+    const novoStatus = statusMap[status] || status;
+    atualizarStatusPedido(codigo, novoStatus, adminNome);
+  }
+}
+
+function atualizarStatusPedido(codigo, novoStatus, adminNome) {
+  const pedido = orders.find(o => o.codigo === codigo);
+  if (pedido) {
+    pedido.status = novoStatus;
+    
+    notifications.push({
+      codigo: codigo,
+      msg: `🔄 Pedido #${codigo} atualizado: ${novoStatus} por ${adminNome}`,
+      data: new Date().toLocaleString('pt-BR'),
+      notaFiscal: gerarNotaFiscal(pedido)
+    });
+    
+    addNotification();
+    saveToStorage();
+    
+    if (currentView === 'notifs') {
+      showNotifs();
+    }
+  }
+}
+
+setInterval(checkTelegramUpdates, 5000);
+
 function loadFromStorage() {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
@@ -125,7 +186,6 @@ function clearStorage() {
   localStorage.removeItem(STORAGE_KEY);
 }
 
-// --- NOTIFICAÇÕES ---
 function updateNotificationCounter() {
   const counter = document.getElementById('notificationCounter');
   const notifBtn = document.getElementById('notifBtn');
@@ -146,12 +206,10 @@ function addNotification() {
   updateNotificationCounter();
 }
 
-// --- TELEGRAM BOT ---
 async function sendTelegramNotification(pedido) {
   const message = `🆕 *NOVO PEDIDO RECEBIDO!*\n\n📦 *Código:* #${pedido.codigo}\n💰 *Total:* R$ ${pedido.total.toFixed(2)}\n📍 *Endereço:* ${pedido.local}\n📱 *Telefone:* ${pedido.whatsapp}\n\n💎 *COMANDOS DISPONÍVEIS:*\n/status${pedido.codigo} pago\n/status${pedido.codigo} preparando\n/status${pedido.codigo} entrega\n/status${pedido.codigo} entregue\n/status${pedido.codigo} cancelado\n\n📋 *Itens:* ${pedido.produtos.map(p => `${p.nome} (x${p.qtd})`).join(', ')}`;
 
   try {
-    // Envia mensagem do pedido
     const messageUrl = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
     const messageResponse = await fetch(messageUrl, {
       method: 'POST',
@@ -167,7 +225,6 @@ async function sendTelegramNotification(pedido) {
 
     const messageResult = await messageResponse.json();
     
-    // Se tem comprovante, envia como documento
     if (pedido.comprovante) {
       await sendComprovanteToTelegram(pedido);
     }
@@ -182,7 +239,6 @@ async function sendTelegramNotification(pedido) {
 
 async function sendComprovanteToTelegram(pedido) {
   try {
-    // Converte base64 para blob
     const base64Data = pedido.comprovante.split(',')[1];
     const binaryString = atob(base64Data);
     const bytes = new Uint8Array(binaryString.length);
@@ -212,7 +268,6 @@ async function sendComprovanteToTelegram(pedido) {
   }
 }
 
-// --- NOTA FISCAL ---
 function gerarNotaFiscal(pedido) {
   return {
     codigo: pedido.codigo,
@@ -277,7 +332,6 @@ function baixarNotaFiscalIndividual(codigo) {
   URL.revokeObjectURL(url);
 }
 
-// --- FUNÇÕES PRINCIPAIS ---
 function goBack(){
   if(currentView === 'categories' || currentView === 'category-products' || currentView === 'cart' || currentView === 'notifs'){
     showHome();
@@ -728,7 +782,6 @@ function showNotifs(){
   document.getElementById('view').innerHTML = html;
 }
 
-// --- INICIALIZAÇÃO ---
 window.showHome = showHome;
 window.showCategories = showCategories;
 window.showCategoryProducts = showCategoryProducts;
@@ -744,7 +797,6 @@ window.goBack = goBack;
 window.exportarNotaFiscal = exportarNotaFiscal;
 window.baixarNotaFiscalIndividual = baixarNotaFiscalIndividual;
 
-// Carrega dados ao iniciar
 loadFromStorage();
 showHome();
 </script>
