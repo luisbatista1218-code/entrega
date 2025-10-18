@@ -111,8 +111,10 @@ async function saveOrderToFirebase(pedido) {
       status: 'Pedido recebido - Aguardando confirmação do pagamento'
     });
     console.log('Pedido salvo no Firebase');
+    return true;
   } catch (error) {
     console.error('Erro ao salvar pedido:', error);
+    return false;
   }
 }
 
@@ -123,8 +125,10 @@ async function updateOrderStatusFirebase(codigo, novoStatus) {
       lastUpdate: firebase.firestore.FieldValue.serverTimestamp()
     });
     console.log('Status atualizado no Firebase');
+    return true;
   } catch (error) {
     console.error('Erro ao atualizar status:', error);
+    return false;
   }
 }
 
@@ -136,17 +140,18 @@ async function loadOrdersFromFirebase() {
     
     orders = [];
     snapshot.forEach(doc => {
+      const data = doc.data();
       orders.push({
         codigo: doc.id,
-        ...doc.data()
+        ...data
       });
     });
     
-    // Atualizar notificações baseadas nos pedidos
     updateNotificationsFromOrders();
-    
+    return true;
   } catch (error) {
     console.error('Erro ao carregar pedidos:', error);
+    return false;
   }
 }
 
@@ -160,13 +165,10 @@ function updateNotificationsFromOrders() {
     });
   });
   
-  // Verificar se há novas notificações
   checkForNewNotifications();
 }
 
 function checkForNewNotifications() {
-  // Lógica para verificar notificações não lidas
-  // Esta é uma implementação básica - você pode expandir conforme necessário
   const newNotifications = notifications.length;
   if (newNotifications > unreadNotifications) {
     unreadNotifications = newNotifications;
@@ -174,7 +176,54 @@ function checkForNewNotifications() {
   }
 }
 
-// --- LOCALSTORAGE (mantido para dados locais) ---
+// --- TELEGRAM CORRIGIDO ---
+async function sendTelegramNotification(pedido) {
+  const message = `NOVO PEDIDO RECEBIDO!\n\nCódigo: #${pedido.codigo}\nTotal: R$ ${pedido.total.toFixed(2)}\nEndereço: ${pedido.local}\nTelefone: ${pedido.whatsapp}\nItens: ${pedido.produtos.map(p => `${p.nome} (x${p.qtd})`).join(', ')}\nData: ${pedido.data}\n\nVerifique a área administrativa.`;
+  
+  try {
+    const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
+    
+    const formData = new URLSearchParams();
+    formData.append('chat_id', CHAT_ID);
+    formData.append('text', message);
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      body: formData,
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+    });
+    
+    const result = await response.json();
+    console.log('Resposta Telegram:', result);
+    
+    if (!result.ok) {
+      console.error('Erro detalhado Telegram:', result);
+      await sendTelegramAlternative(pedido);
+    }
+    return true;
+  } catch (error) {
+    console.error('Erro ao conectar com Telegram:', error);
+    await sendTelegramAlternative(pedido);
+    return false;
+  }
+}
+
+async function sendTelegramAlternative(pedido) {
+  const message = `Pedido #${pedido.codigo} - R$ ${pedido.total.toFixed(2)} - ${pedido.whatsapp}`;
+  const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage?chat_id=${CHAT_ID}&text=${encodeURIComponent(message)}`;
+  
+  try {
+    await fetch(url);
+    return true;
+  } catch (error) {
+    console.error('Método alternativo também falhou:', error);
+    return false;
+  }
+}
+
+// --- LOCALSTORAGE ---
 function loadFromStorage() {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
@@ -254,38 +303,12 @@ function addUserNotification() {
   updateUserNotificationCounter();
 }
 
-// --- TELEGRAM BOT ---
-async function sendTelegramNotification(pedido) {
-  const message = `🆕 *NOVO PEDIDO RECEBIDO!*\n\n📦 *Código:* #${pedido.codigo}\n💰 *Total:* R$ ${pedido.total.toFixed(2)}\n📍 *Endereço:* ${pedido.local}\n📱 *Telefone:* ${pedido.whatsapp}\n📋 *Itens:* ${pedido.produtos.map(p => `${p.nome} (x${p.qtd})`).join(', ')}\n⏰ *Data:* ${pedido.data}\n\n🔔 _Verifique a área administrativa para mais detalhes._`;
-  
-  try {
-    const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        chat_id: CHAT_ID,
-        text: message,
-        parse_mode: 'Markdown'
-      })
-    });
-    
-    const result = await response.json();
-    if (!result.ok) {
-      console.error('Erro Telegram:', result);
-    }
-  } catch (error) {
-    console.error('Erro ao conectar com Telegram:', error);
-  }
-}
-
 // --- ENVIO DE EMAIL (Simulado) ---
 async function sendEmailUpdate(pedido, status) {
-  console.log(`📧 Email (simulado) para: ${pedido.email || 'sem-email'}`);
+  console.log(`📧 Email (simulado) para: ${pedido.whatsapp}`);
   console.log(`Assunto: Atualização do Pedido #${pedido.codigo}`);
   console.log(`Mensagem: Seu pedido foi atualizado para: ${status}`);
+  return true;
 }
 
 // --- ENVIO DE WHATSAPP (Simulado) ---
@@ -293,6 +316,7 @@ async function sendWhatsAppUpdate(pedido, status) {
   console.log(`📱 MENSAGEM (simulada) enviada para: ${pedido.whatsapp}`);
   console.log(`Mensagem: Pedido #${pedido.codigo} - ${status}`);
   await new Promise(resolve => setTimeout(resolve, 800));
+  return true;
 }
 
 // --- FUNÇÕES PRINCIPAIS ---
@@ -708,36 +732,40 @@ function showUploadComprovante(localizacaoData, descricao) {
       };
       
       // SALVAR NO FIREBASE
-      await saveOrderToFirebase(pedido);
+      const firebaseSuccess = await saveOrderToFirebase(pedido);
       
-      // ATUALIZAR LOCALMENTE
-      orders.push(pedido);
-      
-      // NOTIFICAÇÃO PARA O USUÁRIO
-      userNotifications.push({
-        codigo: codigoPedido,
-        msg: `✅ Pedido #${codigoPedido} confirmado! Aguardando confirmação do pagamento`,
-        data: pedido.data
-      });
-      
-      addNotification();
-      addUserNotification();
-      saveToStorage();
-      
-      // Envia para Telegram (bot)
-      await sendTelegramNotification(pedido);
-      
-      // Envia confirmação por "WhatsApp" (simulado)
-      await sendWhatsAppUpdate(pedido, 'Pedido recebido com sucesso!');
-      
-      // Simulação de envio de email
-      await sendEmailUpdate(pedido, 'Pedido recebido');
-      
-      alert(`✅ Pedido #${pedido.codigo} confirmado!\n📱 Mensagem enviada para: ${whatsapp}\n💰 Total: R$ ${totalPedido.toFixed(2)}\n📍 Entrega em: ${localizacao}\n\n📢 Notificação enviada para o administrador!`);
-      
-      cart = [];
-      saveToStorage();
-      showHome();
+      if (firebaseSuccess) {
+        // ATUALIZAR LOCALMENTE
+        orders.push(pedido);
+        
+        // NOTIFICAÇÃO PARA O USUÁRIO
+        userNotifications.push({
+          codigo: codigoPedido,
+          msg: `✅ Pedido #${codigoPedido} confirmado! Aguardando confirmação do pagamento`,
+          data: pedido.data
+        });
+        
+        addNotification();
+        addUserNotification();
+        saveToStorage();
+        
+        // ENVIAR PARA TELEGRAM
+        const telegramSuccess = await sendTelegramNotification(pedido);
+        
+        // Envia confirmação por "WhatsApp" (simulado)
+        await sendWhatsAppUpdate(pedido, 'Pedido recebido com sucesso!');
+        
+        // Simulação de envio de email
+        await sendEmailUpdate(pedido, 'Pedido recebido');
+        
+        alert(`✅ Pedido #${pedido.codigo} confirmado!\n📱 Mensagem enviada para: ${whatsapp}\n💰 Total: R$ ${totalPedido.toFixed(2)}\n📍 Entrega em: ${localizacao}\n\n📢 ${telegramSuccess ? 'Notificação enviada para o administrador!' : 'Erro ao enviar notificação'}`);
+        
+        cart = [];
+        saveToStorage();
+        showHome();
+      } else {
+        alert('❌ Erro ao salvar pedido. Tente novamente.');
+      }
     };
     
     reader.onerror = function() {
@@ -844,35 +872,39 @@ async function atualizarStatus(codigo, novoStatus){
     pedido.status = novoStatus;
     
     // ATUALIZAR NO FIREBASE
-    await updateOrderStatusFirebase(codigo, novoStatus);
+    const firebaseSuccess = await updateOrderStatusFirebase(codigo, novoStatus);
     
-    // Atualiza notificações do sistema
-    const notifIndex = notifications.findIndex(n => n.codigo === codigo);
-    if(notifIndex !== -1) {
-      notifications[notifIndex].msg = `Status atualizado: ${novoStatus}`;
+    if (firebaseSuccess) {
+      // Atualiza notificações do sistema
+      const notifIndex = notifications.findIndex(n => n.codigo === codigo);
+      if(notifIndex !== -1) {
+        notifications[notifIndex].msg = `Status atualizado: ${novoStatus}`;
+      } else {
+        notifications.push({codigo: codigo, msg: `Status atualizado: ${novoStatus}`, data: new Date().toLocaleString('pt-BR')});
+      }
+      
+      // ADICIONA NOTIFICAÇÃO PARA O USUÁRIO
+      userNotifications.push({
+        codigo: codigo,
+        msg: `🔄 Pedido #${codigo} atualizado: ${novoStatus}`,
+        data: new Date().toLocaleString('pt-BR')
+      });
+      
+      addNotification();
+      addUserNotification();
+      saveToStorage();
+      
+      // Envia atualização por WhatsApp para o cliente (simulado)
+      await sendWhatsAppUpdate(pedido, novoStatus);
+      
+      // Envia email de atualização (simulado)
+      await sendEmailUpdate(pedido, novoStatus);
+      
+      alert(`✅ Status do pedido #${codigo} atualizado para: ${novoStatus}\n📱 Mensagem enviada para o cliente: ${pedido.whatsapp}`);
+      showAdminOrders();
     } else {
-      notifications.push({codigo: codigo, msg: `Status atualizado: ${novoStatus}`, data: new Date().toLocaleString('pt-BR')});
+      alert('❌ Erro ao atualizar status no banco de dados.');
     }
-    
-    // ADICIONA NOTIFICAÇÃO PARA O USUÁRIO
-    userNotifications.push({
-      codigo: codigo,
-      msg: `🔄 Pedido #${codigo} atualizado: ${novoStatus}`,
-      data: new Date().toLocaleString('pt-BR')
-    });
-    
-    addNotification();
-    addUserNotification();
-    saveToStorage();
-    
-    // Envia atualização por WhatsApp para o cliente (simulado)
-    await sendWhatsAppUpdate(pedido, novoStatus);
-    
-    // Envia email de atualização (simulado)
-    await sendEmailUpdate(pedido, novoStatus);
-    
-    alert(`✅ Status do pedido #${codigo} atualizado para: ${novoStatus}\n📱 Mensagem enviada para o cliente: ${pedido.whatsapp}`);
-    showAdminOrders();
   }
 }
 
@@ -898,18 +930,20 @@ window.goBack = goBack;
 loadFromStorage();
 showHome();
 
-// Configurar listener para atualizações em tempo real
+// Configurar listener para atualizações em tempo real do Firebase
 db.collection('orders')
   .orderBy('timestamp', 'desc')
   .onSnapshot((snapshot) => {
     orders = [];
     snapshot.forEach(doc => {
+      const data = doc.data();
       orders.push({
         codigo: doc.id,
-        ...doc.data()
+        ...data
       });
     });
     updateNotificationsFromOrders();
+    console.log('Pedidos atualizados em tempo real:', orders.length);
   });
 </script>
 
