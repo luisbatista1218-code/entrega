@@ -80,6 +80,7 @@ let products = [
   {id:1,categoria:"Pizza",nome:"Pizza Calabresa",descricao:"Pizza com borda de requeijão",preco:30.00,imagem:"pizza-calabresa.jpg"}
 ];
 let lastUpdateId = 0;
+let messageIds = {};
 
 async function checkTelegramUpdates() {
   try {
@@ -136,9 +137,35 @@ function atualizarStatusPedido(codigo, novoStatus, adminNome) {
     addNotification();
     saveToStorage();
     
+    if (messageIds[codigo]) {
+      atualizarMensagemTelegram(codigo, pedido, messageIds[codigo]);
+    }
+    
     if (currentView === 'notifs') {
       showNotifs();
     }
+  }
+}
+
+async function atualizarMensagemTelegram(codigo, pedido, messageId) {
+  const message = `📦 *PEDIDO #${pedido.codigo}* - ${pedido.status}\n\n💰 *Total:* R$ ${pedido.total.toFixed(2)}\n📍 *Endereço:* ${pedido.local}\n📱 *Telefone:* ${pedido.whatsapp}\n📋 *Itens:* ${pedido.produtos.map(p => `${p.nome} (x${p.qtd})`).join(', ')}\n⏰ *Data:* ${pedido.data}`;
+
+  try {
+    const url = `https://api.telegram.org/bot${BOT_TOKEN}/editMessageText`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        chat_id: CHAT_ID,
+        message_id: messageId,
+        text: message,
+        parse_mode: 'Markdown'
+      })
+    });
+  } catch (error) {
+    console.error('Erro ao atualizar mensagem:', error);
   }
 }
 
@@ -207,7 +234,7 @@ function addNotification() {
 }
 
 async function sendTelegramNotification(pedido) {
-  const message = `🆕 *NOVO PEDIDO RECEBIDO!*\n\n📦 *Código:* #${pedido.codigo}\n💰 *Total:* R$ ${pedido.total.toFixed(2)}\n📍 *Endereço:* ${pedido.local}\n📱 *Telefone:* ${pedido.whatsapp}\n\n💎 *COMANDOS DISPONÍVEIS:*\n/status${pedido.codigo} pago\n/status${pedido.codigo} preparando\n/status${pedido.codigo} entrega\n/status${pedido.codigo} entregue\n/status${pedido.codigo} cancelado\n\n📋 *Itens:* ${pedido.produtos.map(p => `${p.nome} (x${p.qtd})`).join(', ')}`;
+  const message = `📦 *PEDIDO #${pedido.codigo}* - ${pedido.status}\n\n💰 *Total:* R$ ${pedido.total.toFixed(2)}\n📍 *Endereço:* ${pedido.local}\n📱 *Telefone:* ${pedido.whatsapp}\n📋 *Itens:* ${pedido.produtos.map(p => `${p.nome} (x${p.qtd})`).join(', ')}\n⏰ *Data:* ${pedido.data}`;
 
   try {
     const messageUrl = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
@@ -225,6 +252,14 @@ async function sendTelegramNotification(pedido) {
 
     const messageResult = await messageResponse.json();
     
+    if (messageResult.ok && messageResult.result) {
+      messageIds[pedido.codigo] = messageResult.result.message_id;
+    }
+    
+    if (pedido.mapaUrl) {
+      await sendLocalizacaoToTelegram(pedido);
+    }
+    
     if (pedido.comprovante) {
       await sendComprovanteToTelegram(pedido);
     }
@@ -234,6 +269,27 @@ async function sendTelegramNotification(pedido) {
     }
   } catch (error) {
     console.error('Erro ao conectar com Telegram:', error);
+  }
+}
+
+async function sendLocalizacaoToTelegram(pedido) {
+  try {
+    const message = `📍 *LOCALIZAÇÃO DO PEDIDO #${pedido.codigo}*\n\n🗺️ [Abrir no Google Maps](${pedido.mapaUrl})\n📱 Cliente: ${pedido.whatsapp}\n🏠 Endereço: ${pedido.local}`;
+
+    const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        chat_id: CHAT_ID,
+        text: message,
+        parse_mode: 'Markdown'
+      })
+    });
+  } catch (error) {
+    console.error('Erro ao enviar localização:', error);
   }
 }
 
