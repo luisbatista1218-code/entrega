@@ -131,7 +131,8 @@ function atualizarStatusPedido(codigo, novoStatus, adminNome) {
       codigo: codigo,
       msg: `🔄 Pedido #${codigo} atualizado: ${novoStatus} por ${adminNome}`,
       data: new Date().toLocaleString('pt-BR'),
-      notaFiscal: gerarNotaFiscal(pedido)
+      notaFiscal: gerarNotaFiscal(pedido),
+      status: novoStatus
     });
     
     addNotification();
@@ -164,12 +165,17 @@ async function atualizarMensagemTelegram(codigo, pedido, messageId) {
         parse_mode: 'Markdown'
       })
     });
+
+    const result = await response.json();
+    if (!result.ok) {
+      console.error('Erro ao atualizar mensagem:', result);
+    }
   } catch (error) {
     console.error('Erro ao atualizar mensagem:', error);
   }
 }
 
-setInterval(checkTelegramUpdates, 5000);
+setInterval(checkTelegramUpdates, 3000);
 
 function loadFromStorage() {
   try {
@@ -348,12 +354,18 @@ function gerarNotaFiscal(pedido) {
 }
 
 function exportarNotaFiscal() {
-  if (orders.length === 0) {
-    alert('Nenhum pedido encontrado!');
+  const pedidosPagos = orders.filter(pedido => 
+    pedido.status.includes('Pagamento confirmado') || 
+    pedido.status.includes('entregue') ||
+    pedido.status.includes('entregue')
+  );
+  
+  if (pedidosPagos.length === 0) {
+    alert('Nenhum pedido pago encontrado! A nota fiscal só está disponível para pedidos com pagamento confirmado.');
     return;
   }
   
-  const notasFiscais = orders.map(pedido => gerarNotaFiscal(pedido));
+  const notasFiscais = pedidosPagos.map(pedido => gerarNotaFiscal(pedido));
   const dataStr = JSON.stringify(notasFiscais, null, 2);
   const dataBlob = new Blob([dataStr], {type: 'application/json'});
   
@@ -371,6 +383,13 @@ function baixarNotaFiscalIndividual(codigo) {
   const pedido = orders.find(o => o.codigo === codigo);
   if (!pedido) {
     alert('Pedido não encontrado!');
+    return;
+  }
+
+  if (!pedido.status.includes('Pagamento confirmado') && 
+      !pedido.status.includes('entregue') &&
+      !pedido.status.includes('entregue')) {
+    alert('Nota fiscal só disponível para pedidos com pagamento confirmado!');
     return;
   }
   
@@ -791,7 +810,8 @@ function showUploadComprovante(localizacaoData, descricao) {
         codigo: codigoPedido,
         msg: `Pedido #${codigoPedido} realizado - R$ ${totalPedido.toFixed(2)} - Status: Aguardando pagamento`,
         data: pedido.data,
-        notaFiscal: gerarNotaFiscal(pedido)
+        notaFiscal: gerarNotaFiscal(pedido),
+        status: pedido.status
       });
       
       addNotification();
@@ -826,11 +846,17 @@ function showNotifs(){
     html += '<p>Nenhuma notificação.</p>';
   } else {
     notifications.slice().reverse().forEach(notif => {
+      const podeBaixar = notif.status && (
+        notif.status.includes('Pagamento confirmado') || 
+        notif.status.includes('entregue') ||
+        notif.status.includes('entregue')
+      );
+      
       html += `<div class='card'>
         <b>Pedido #${notif.codigo}</b>
         <div>${notif.msg}</div>
         <small>${notif.data}</small>
-        <button class="btn" onclick="baixarNotaFiscalIndividual(${notif.codigo})" style="margin-top: 10px;">📄 Baixar Nota Fiscal</button>
+        ${podeBaixar ? `<button class="btn" onclick="baixarNotaFiscalIndividual(${notif.codigo})" style="margin-top: 10px;">📄 Baixar Nota Fiscal</button>` : ''}
       </div>`;
     });
   }
