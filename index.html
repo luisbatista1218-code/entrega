@@ -121,25 +121,26 @@ function processarComandoStatus(text, adminNome) {
       'cancelado': '❌ Pedido cancelado'
     };
     
-    const novoStatus = statusMap[status] || status;
-    atualizarStatusPedido(codigo, novoStatus, adminNome);
+    if (statusMap[status]) {
+      const novoStatus = statusMap[status];
+      atualizarStatusPedido(codigo, novoStatus, adminNome);
+    }
   }
 }
 
 function atualizarStatusPedido(codigo, novoStatus, adminNome) {
   const pedido = orders.find(o => o.codigo === codigo);
   if (pedido && pedido.status !== novoStatus) {
-    const statusAnterior = pedido.status;
     pedido.status = novoStatus;
     
     const notificacaoExistente = notifications.find(n => 
-      n.codigo === codigo && n.msg.includes(novoStatus)
+      n.codigo === codigo && n.status === novoStatus
     );
     
     if (!notificacaoExistente) {
       notifications.push({
         codigo: codigo,
-        msg: `🔄 Pedido #${codigo} atualizado: ${novoStatus} por ${adminNome}`,
+        msg: `🔄 Pedido #${codigo} atualizado: ${novoStatus}`,
         data: new Date().toLocaleString('pt-BR'),
         notaFiscal: gerarNotaFiscal(pedido),
         status: novoStatus
@@ -179,11 +180,8 @@ async function atualizarMensagemTelegram(codigo, pedido, messageId) {
     });
 
     const result = await response.json();
-    if (!result.ok) {
-      console.error('Erro ao atualizar mensagem:', result);
-      if (result.error_code === 400) {
-        delete messageIds[codigo];
-      }
+    if (!result.ok && result.error_code === 400) {
+      delete messageIds[codigo];
     }
   } catch (error) {
     console.error('Erro ao atualizar mensagem:', error);
@@ -284,10 +282,6 @@ async function sendTelegramNotification(pedido) {
     if (pedido.comprovante) {
       await sendComprovanteToTelegram(pedido);
     }
-
-    if (!messageResult.ok) {
-      console.error('Erro Telegram:', messageResult);
-    }
   } catch (error) {
     console.error('Erro ao conectar com Telegram:', error);
   }
@@ -335,11 +329,6 @@ async function sendComprovanteToTelegram(pedido) {
       method: 'POST',
       body: formData
     });
-
-    const result = await response.json();
-    if (!result.ok) {
-      console.error('Erro ao enviar comprovante:', result);
-    }
   } catch (error) {
     console.error('Erro ao enviar comprovante para Telegram:', error);
   }
